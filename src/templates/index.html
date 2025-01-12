@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Droid Command Interface</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+        }
+        #commandButtons {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+        }
+        button {
+            padding: 15px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            background-color: #007BFF;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:active {
+            background-color: #004080;
+        }
+        .clicked {
+            background-color: #28a745 !important;
+        }
+        #message {
+            margin-top: 20px;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Send Command to Droid</h1>
+    <div id="commandButtons">
+        <button data-command="laugh">Laugh</button>
+        <button data-command="yes">Yes</button>
+        <button data-command="no">No</button>
+        <button data-command="alarm">Alarm</button>
+        <button data-command="angry">Angry</button>
+        <button data-command="annoyed">Annoyed</button>
+        <button data-command="ionblast">Ion Blast</button>
+        <button data-command="sad">Sad</button>
+        <button data-command="scared">Scared</button>
+        <button data-command="chatty">Chatty</button>
+        <button data-command="confident">Confident</button>
+        <button data-command="excited">Excited</button>
+        <button data-command="happy">Happy</button>
+        <button data-command="surprise">Surprise</button>
+        <button data-command="tripod">Tripod</button>
+        <button data-command="bipod">Bipod</button>
+    </div>
+    <div id="message"></div>
+
+    <script>
+        document.getElementById('commandButtons').addEventListener('click', function(event) {
+            if (event.target.tagName === 'BUTTON') {
+                const button = event.target;
+                const command = button.getAttribute('data-command');
+                const formData = new FormData();
+                formData.append('command', command);
+
+                button.classList.add('clicked');
+                setTimeout(() => button.classList.remove('clicked'), 500);
+
+                fetch('/send_command', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    const messageDiv = document.getElementById('message');
+                    messageDiv.textContent = data.message;
+                    if (data.status === 'success') {
+                        messageDiv.style.color = 'green';
+                        setTimeout(() => {
+                            messageDiv.textContent = '';
+                        }, 3000);
+                    } else {
+                        messageDiv.style.color = 'red';
+                    }
+                })
+                .catch(error => {
+                    const messageDiv = document.getElementById('message');
+                    messageDiv.textContent = 'An error occurred: ' + error;
+                    messageDiv.style.color = 'red';
+                });
+            }
+        });
+    </script>
+</body>
+</html>
