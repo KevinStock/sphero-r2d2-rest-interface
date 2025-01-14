@@ -35,10 +35,9 @@ commandmap = {
     "bipod": [0x0A, 0x17, 0x0D, 0x1C, 0x02]
 }
 
-# Wake-up and sleep packets
-# 'usetheforce...band' tells the droid we're a controller, I guess.  Prevents disconnection.
+# 'use_the_force' tells the droid we're a controller.  Prevents disconnection.
 use_the_force = [0x75, 0x73, 0x65, 0x74, 0x68, 0x65, 0x66, 0x6F, 0x72, 0x63, 0x65, 0x2E, 0x2E, 0x2E, 0x62, 0x61, 0x6E, 0x64]
-# wake from sleep?  Droid is responsive and front led flashes blue/red
+# wake from sleep.  Droid is responsive and front led flashes blue/red
 wake_up_packet = [0x8D, 0x0A, 0x13, 0x0D, 0x00, 0xD5, 0xD8]
 # Turn on holoprojector led, 0xff (max) intensity
 holoprojector_on = [0x8D, 0x0A, 0x1A, 0x0E, 0x1C, 0x00, 0x80, 0xFF, 0x32, 0xD8]
@@ -106,7 +105,7 @@ def send_command():
     else:
         return json.dumps({"status": "error", "message": "Invalid command."})
 
-@app.route('/put_to_sleep', methods=['POST'])
+@app.route('/put_to_sleep', methods=['GET'])
 def put_to_sleep():
     try:
         global address
