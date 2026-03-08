@@ -1,124 +1,199 @@
-from flask import Flask, request, render_template
-import json
-import pygatt
+import os
 import time
 import logging
-import sys
-from pygatt.backends import BLEAddressType, Characteristic, BLEBackend
+
+from flask import Flask, request, render_template, jsonify
+import pygatt
+from pygatt.backends import BLEAddressType
+
+# ---------------------------------------------------------------------------
+# Configuration (override via environment variables)
+# ---------------------------------------------------------------------------
+ADDRESS = os.environ.get("DROID_BLE_ADDRESS", "E2:7D:CA:55:E5:5F")
+SLEEP_ON_EXIT = os.environ.get("DROID_SLEEP_ON_EXIT", "true").lower() in ("1", "true", "yes")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-command = None
-address = 'E2:7D:CA:55:E5:5F'
-sendbytes = None
-debuglogging = False
-sleeponexit = True
-sequences = []
-
 # Command mapping from droid.py
-commandmap = {
-    "laugh": [0x0A,0x18,0x00,0x1F,0x00,0x32,0x00,0x00,0x00,0x00,0x00],
-    "yes": [0x0A, 0x17, 0x05, 0x41, 0x00, 0x0F],
-    "no": [0x0A, 0x17, 0x05, 0x3F, 0x00, 0x10],
-    "alarm": [0x0A, 0x17, 0x05, 0x17, 0x00, 0x07],
-    "angry": [0x0A, 0x17, 0x05, 0x18, 0x00, 0x08],
-    "annoyed": [0x0A, 0x17, 0x05, 0x19, 0x00, 0x09],
-    "ionblast": [0x0A, 0x17, 0x05, 0x1A, 0x00, 0x0E],
-    "sad": [0x0A, 0x17, 0x05, 0x1C, 0x00, 0x11],
-    "scared": [0x0A, 0x17, 0x05, 0x1D, 0x00, 0x13],
-    "chatty": [0x0A, 0x17, 0x05, 0x17, 0x00, 0x0A],
-    "confident": [0x0A, 0x17, 0x05, 0x18, 0x00, 0x12],
-    "excited": [0x0A, 0x17, 0x05, 0x19, 0x00, 0x0C],
-    "happy": [0x0A, 0x17, 0x05, 0x1A, 0x00, 0x0D],
-    "surprise": [0x0A, 0x17, 0x05, 0x1C, 0x00, 0x18],
-    "tripod": [0x0A, 0x17, 0x0D, 0x1D, 0x01],
-    "bipod": [0x0A, 0x17, 0x0D, 0x1C, 0x02]
+# Animation IDs from spherov2.py R2D2.Animations enum
+# Sequence byte (3rd data byte) is arbitrary; animation ID is the last 2 bytes (big-endian)
+COMMAND_MAP = {
+    # --- Emote animations (sounds + movement) ---
+    "laugh": [0x0A, 0x17, 0x05, 0x01, 0x00, 0x0F],       # 15 = EMOTE_LAUGH
+    "yes": [0x0A, 0x17, 0x05, 0x02, 0x00, 0x15],          # 21 = EMOTE_YES
+    "no": [0x0A, 0x17, 0x05, 0x03, 0x00, 0x10],           # 16 = EMOTE_NO
+    "alarm": [0x0A, 0x17, 0x05, 0x04, 0x00, 0x07],        # 7  = EMOTE_ALARM
+    "angry": [0x0A, 0x17, 0x05, 0x05, 0x00, 0x08],        # 8  = EMOTE_ANGRY
+    "annoyed": [0x0A, 0x17, 0x05, 0x06, 0x00, 0x0A],      # 10 = EMOTE_FRUSTRATED
+    "ionblast": [0x0A, 0x17, 0x05, 0x07, 0x00, 0x0E],     # 14 = EMOTE_SHORT_CIRCUIT
+    "excited": [0x0A, 0x17, 0x05, 0x08, 0x00, 0x0C],      # 12 = EMOTE_EXCITED
+    "surprise": [0x0A, 0x17, 0x05, 0x09, 0x00, 0x18],     # 24 = EMOTE_SURPRISED
+    # --- WWM (Watch With Me) animations ---
+    "sad": [0x0A, 0x17, 0x05, 0x0A, 0x00, 0x2F],          # 47 = WWM_SAD
+    "scared": [0x0A, 0x17, 0x05, 0x0B, 0x00, 0x30],       # 48 = WWM_SCARED
+    "chatty": [0x0A, 0x17, 0x05, 0x0C, 0x00, 0x36],       # 54 = WWM_YOOHOO
+    "confident": [0x0A, 0x17, 0x05, 0x0D, 0x00, 0x21],    # 33 = WWM_BOW
+    "happy": [0x0A, 0x17, 0x05, 0x0E, 0x00, 0x28],        # 40 = WWM_HAPPY
+    # --- Movement animations ---
+    "bow": [0x0A, 0x17, 0x05, 0x10, 0x00, 0x21],          # 33 = WWM_BOW
+    "doubletake": [0x0A, 0x17, 0x05, 0x11, 0x00, 0x24],   # 36 = WWM_DOUBLE_TAKE
+    "shake": [0x0A, 0x17, 0x05, 0x12, 0x00, 0x31],        # 49 = WWM_SHAKE
+    "longshake": [0x0A, 0x17, 0x05, 0x13, 0x00, 0x2B],    # 43 = WWM_LONG_SHAKE
+    "jittery": [0x0A, 0x17, 0x05, 0x14, 0x00, 0x29],      # 41 = WWM_JITTERY
+    "drive": [0x0A, 0x17, 0x05, 0x15, 0x00, 0x0B],        # 11 = EMOTE_DRIVE
+    "taunting": [0x0A, 0x17, 0x05, 0x16, 0x00, 0x33],     # 51 = WWM_TAUNTING
+    "whisper": [0x0A, 0x17, 0x05, 0x17, 0x00, 0x34],      # 52 = WWM_WHISPER
+    "yelling": [0x0A, 0x17, 0x05, 0x18, 0x00, 0x35],      # 53 = WWM_YELLING
+    "curious": [0x0A, 0x17, 0x05, 0x19, 0x00, 0x23],      # 35 = WWM_CURIOUS
+    # --- Leg actions (device 0x17, command 0x0D) ---
+    "tripod": [0x0A, 0x17, 0x0D, 0x1D, 0x01],             # THREE_LEGS
+    "bipod": [0x0A, 0x17, 0x0D, 0x1C, 0x02],              # TWO_LEGS
+    "waddle": [0x0A, 0x17, 0x0D, 0x1E, 0x03],             # WADDLE
+    "stopwaddle": [0x0A, 0x17, 0x0D, 0x1F, 0x00],         # STOP
+    # --- Head rotation (device 0x17, command 0x0F, float angle big-endian) ---
+    "headleft": [0x0A, 0x17, 0x0F, 0x20, 0xC2, 0xB4, 0x00, 0x00],   # -90.0 degrees
+    "headright": [0x0A, 0x17, 0x0F, 0x21, 0x42, 0xB4, 0x00, 0x00],  #  90.0 degrees
+    "headcenter": [0x0A, 0x17, 0x0F, 0x22, 0x00, 0x00, 0x00, 0x00], #   0.0 degrees
 }
 
-# 'use_the_force' tells the droid we're a controller.  Prevents disconnection.
-use_the_force = [0x75, 0x73, 0x65, 0x74, 0x68, 0x65, 0x66, 0x6F, 0x72, 0x63, 0x65, 0x2E, 0x2E, 0x2E, 0x62, 0x61, 0x6E, 0x64]
-# wake from sleep.  Droid is responsive and front led flashes blue/red
-wake_up_packet = [0x8D, 0x0A, 0x13, 0x0D, 0x00, 0xD5, 0xD8]
-# Turn on holoprojector led, 0xff (max) intensity
-holoprojector_on = [0x8D, 0x0A, 0x1A, 0x0E, 0x1C, 0x00, 0x80, 0xFF, 0x32, 0xD8]
-# Rotate top to -90 degrees
-rotate_top_90 = [0x8D, 0x0A, 0x17, 0x0F, 0x1C, 0x42, 0xB4, 0x00, 0x00, 0xBD, 0xD8]
-# Rotate top to 0 degrees
-rotate_top_0 = [0x8D, 0x0A, 0x17, 0x0F, 0x1E, 0x00, 0x00, 0x00, 0x00, 0xB1, 0xD8]
-# put the droid to sleep
-sleep_packet = [0x8D, 0x0A, 0x13, 0x01, 0x17, 0xCA, 0xD8]
+# ---------------------------------------------------------------------------
+# Available command names (used by /commands endpoint)
+# ---------------------------------------------------------------------------
+COMMAND_NAMES = sorted(COMMAND_MAP.keys())
 
-def BuildPacket(bytes):
+# ---------------------------------------------------------------------------
+# BLE packets
+# ---------------------------------------------------------------------------
+# 'use_the_force' tells the droid we're a controller.  Prevents disconnection.
+USE_THE_FORCE = [0x75, 0x73, 0x65, 0x74, 0x68, 0x65, 0x66, 0x6F,
+                 0x72, 0x63, 0x65, 0x2E, 0x2E, 0x2E, 0x62, 0x61, 0x6E, 0x64]
+# Wake from sleep — droid becomes responsive; front LED flashes blue/red.
+WAKE_UP_PACKET = [0x8D, 0x0A, 0x13, 0x0D, 0x00, 0xD5, 0xD8]
+# Turn on holoprojector LED at max (0xFF) intensity.
+HOLOPROJECTOR_ON = [0x8D, 0x0A, 0x1A, 0x0E, 0x1C, 0x00, 0x80, 0xFF, 0x32, 0xD8]
+# Put the droid to sleep.
+SLEEP_PACKET = [0x8D, 0x0A, 0x13, 0x01, 0x17, 0xCA, 0xD8]
+
+# BLE ATT handles used by pygatt
+HANDLE_FORCE = 0x15   # Anti-DOS characteristic
+HANDLE_COMMAND = 0x1C  # Command write characteristic
+
+
+def build_packet(data):
+    """Wrap *data* in the Sphero packet framing (0x8D … CRC … 0xD8)."""
     ret = [0x8D]
-    for b in bytes:
+    for b in data:
         ret.append(b)
-    ret.append(GenCrc(bytes))
+    ret.append(_gen_crc(data))
     ret.append(0xD8)
     return ret
 
-def GenCrc(bytes):
-    ret = 0
-    for b in bytes:
-        ret += b
-        ret = ret % 256
-    return ~ret % 256
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+def _gen_crc(data):
+    """Compute the Sphero checksum (one's complement of the sum mod 256)."""
+    return ~sum(data) % 256
 
-@app.route('/send_command', methods=['GET', 'POST'])
-def send_command():
-    command = request.args.get('command') if request.method == 'GET' else request.form.get('command')
-    if command in commandmap:
-        try:
-            global address
-            sequences = [commandmap[command]]
 
-            adapter = pygatt.GATTToolBackend()
-            adapter.start()
-            device = adapter.connect(address=address, address_type=BLEAddressType.random)
-
-            device.char_write_handle(0x15, use_the_force, True)
-            device.char_write_handle(0x1c, wake_up_packet, True)
-            device.char_write_handle(0x1c, holoprojector_on, True)
-
-            for seq in sequences:
-                device.char_write_handle(0x1c, BuildPacket(seq), True)
-                time.sleep(6)
-
-            # rotate top to -90 degrees
-            #device.char_write_handle(0x1c, rotate_top_90, True)
-            #time.sleep(1)
-
-            # rotate top to 0 degrees
-            #device.char_write_handle(0x1c, rotate_top_0, True)
-            #time.sleep(1)
-            
-            if sleeponexit:
-                # put the droid to sleep
-                device.char_write_handle(0x1c, sleep_packet, True)
-            adapter.stop()
-            return json.dumps({"status": "success", "message": f"Command '{command}' sent successfully."}), 200
-        except Exception as e:
-            return json.dumps({"status": "error", "message": str(e)}), 500
-    else:
-        return json.dumps({"status": "error", "message": "Invalid command."})
-
-@app.route('/put_to_sleep', methods=['GET'])
-def put_to_sleep():
+# ---------------------------------------------------------------------------
+# BLE helper — centralised connect → command → disconnect logic
+# ---------------------------------------------------------------------------
+def _send_sequences(sequences, *, wake=True, sleep=SLEEP_ON_EXIT):
+    """Connect to the droid via pygatt (GATTToolBackend), send *sequences*,
+    optionally waking the droid first and putting it to sleep afterwards.
+    """
+    adapter = pygatt.GATTToolBackend()
     try:
-        global address
-        adapter = pygatt.GATTToolBackend()
         adapter.start()
-        device = adapter.connect(address=address, address_type=BLEAddressType.random)
+        device = adapter.connect(address=ADDRESS, address_type=BLEAddressType.random)
 
-        device.char_write_handle(0x15, sleep_packet, True)
-        
+        device.char_write_handle(HANDLE_FORCE, USE_THE_FORCE, True)
+
+        if wake:
+            device.char_write_handle(HANDLE_COMMAND, WAKE_UP_PACKET, True)
+            # Give the droid time to wake up and initialise its audio subsystem
+            time.sleep(2)
+            device.char_write_handle(HANDLE_COMMAND, HOLOPROJECTOR_ON, True)
+
+        for seq in sequences:
+            device.char_write_handle(HANDLE_COMMAND, build_packet(seq), True)
+            time.sleep(6)
+
+        if sleep:
+            device.char_write_handle(HANDLE_COMMAND, SLEEP_PACKET, True)
+    finally:
         adapter.stop()
-        return "Droid put to sleep successfully"
-    except Exception as e:
-        return str(e)
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+# ---------------------------------------------------------------------------
+# Flask routes
+# ---------------------------------------------------------------------------
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/commands", methods=["GET"])
+def list_commands():
+    """Return the list of available command names."""
+    return jsonify({"commands": COMMAND_NAMES})
+
+
+@app.route("/send_command", methods=["GET", "POST"])
+def send_command():
+    command = (
+        request.args.get("command") if request.method == "GET"
+        else request.form.get("command")
+    )
+    if command not in COMMAND_MAP:
+        return jsonify({"status": "error", "message": "Invalid command."}), 400
+
+    try:
+        logger.info("Sending command: %s", command)
+        _send_sequences([COMMAND_MAP[command]])
+        return jsonify({"status": "success", "message": f"Command '{command}' sent successfully."})
+    except Exception as e:
+        logger.exception("Failed to send command '%s'", command)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/put_to_sleep", methods=["GET"])
+def put_to_sleep():
+    """Send only the sleep packet (no wake / holoprojector)."""
+    adapter = pygatt.GATTToolBackend()
+    try:
+        adapter.start()
+        device = adapter.connect(address=ADDRESS, address_type=BLEAddressType.random)
+        device.char_write_handle(HANDLE_FORCE, USE_THE_FORCE, True)
+        device.char_write_handle(HANDLE_COMMAND, SLEEP_PACKET, True)
+        return jsonify({"status": "success", "message": "Droid put to sleep successfully."})
+    except Exception as e:
+        logger.exception("Failed to put droid to sleep")
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        adapter.stop()
+
+
+@app.route("/test_sound", methods=["GET"])
+def test_sound():
+    """Test different animation/sound IDs. Usage: /test_sound?id=11"""
+    sound_id = request.args.get("id", type=int)
+    if sound_id is None or not 0 <= sound_id <= 255:
+        return jsonify({"status": "error", "message": "Provide ?id=0 through ?id=255"}), 400
+
+    try:
+        seq = [0x0A, 0x17, 0x05, 0x18, 0x00, sound_id]
+        logger.info("Testing sound id=%d (0x%02X)", sound_id, sound_id)
+        _send_sequences([seq])
+        return jsonify({"status": "success", "message": f"Played sound id={sound_id} (0x{sound_id:02X})"})
+    except Exception as e:
+        logger.exception("Failed to play sound id=%s", sound_id)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)

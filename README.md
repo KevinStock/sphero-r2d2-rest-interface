@@ -1,77 +1,122 @@
 # Sphero R2D2 REST Interface
 
-This project is a Flask web application that provides a RESTful interface to send commands to a Sphero R2D2 droid via Bluetooth.
+A Flask web application that provides a RESTful interface to send commands to a Sphero R2D2 droid via Bluetooth Low Energy (BLE).
+
+Two platform-specific entry points are provided:
+
+| File | Platform | BLE library |
+|------|----------|-------------|
+| `src/app.py` | **Linux** (BlueZ / gatttool) | [pygatt](https://github.com/peplin/pygatt) |
+| `src/app_windows.py` | **Windows** (WinRT) | [bleak](https://github.com/hbldh/bleak) |
 
 ## Project Structure
 
 ```
 sphero-r2d2-rest-interface
 ├── src
-│   ├── app.py            # Main entry point of the Flask application
+│   ├── app.py                # Flask app – Linux (pygatt / BlueZ)
+│   ├── app_windows.py        # Flask app – Windows (bleak / WinRT)
 │   └── templates
-│       └── index.html    # HTML template for the web interface
-├── requirements.txt       # Lists project dependencies
-└── README.md              # Project documentation
+│       └── index.html        # Shared HTML template for the web interface
+├── requirements.txt           # Linux dependencies
+├── requirements_windows.txt   # Windows dependencies
+└── README.md                  # This file
 ```
 
 ## Setup Instructions
 
+### Linux
+
 1. **Clone the repository:**
-   ```
+   ```bash
    git clone <repository-url>
    cd sphero-r2d2-rest-interface
    ```
 
 2. **Install dependencies:**
-   Make sure you have Python installed, then run:
-   ```
+   ```bash
    pip install -r requirements.txt
    ```
 
 3. **Run the application:**
-   ```
+   ```bash
    python src/app.py
    ```
 
-4. **Access the web interface:**
-   Open your web browser and go to `http://127.0.0.1:5000`.
+### Windows
+
+1. **Clone the repository:**
+   ```powershell
+   git clone <repository-url>
+   cd sphero-r2d2-rest-interface
+   ```
+
+2. **Install dependencies:**
+   ```powershell
+   pip install -r requirements_windows.txt
+   ```
+
+3. **Run the application:**
+   ```powershell
+   python src/app_windows.py
+   ```
+
+### Access the web interface
+
+Open your browser and go to `http://127.0.0.1:5000`.
+
+## Configuration
+
+The droid address and sleep-on-exit behaviour can be set via **environment variables** instead of editing source code:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DROID_BLE_ADDRESS` | `E2:7D:CA:55:E5:5F` | Bluetooth address of your R2-D2 droid |
+| `DROID_SLEEP_ON_EXIT` | `true` | Put the droid to sleep after each command (`true`/`false`) |
+
+Example (Linux):
+```bash
+DROID_BLE_ADDRESS="E3:61:5F:C0:FF:EE" python src/app.py
+```
+
+Example (Windows PowerShell):
+```powershell
+$env:DROID_BLE_ADDRESS = "E3:61:5F:C0:FF:EE"
+python src/app_windows.py
+```
 
 ## Obtaining the Bluetooth Identifier Address
 
-To communicate with the droid, you need to obtain its Bluetooth identifier address. Follow these steps:
+### Linux (BlueZ)
 
-1. **Install BlueZ:**
-   Ensure you have the BlueZ package installed on your Linux machine. BlueZ includes tools for interacting with Bluetooth devices.
+1. **Install BlueZ** – ensure the BlueZ package is installed.
 
-2. **Scan for BLE Devices:**
-   Use `hcitool` to scan for BLE devices:
-   ```
+2. **Scan for BLE devices:**
+   ```bash
    sudo hcitool lescan
    ```
-   This will list all the BLE devices the machine can see, including something like:
+   Look for an entry like:
    ```
    E3:61:5F:C0:FF:EE D2-FFEE
    ```
-   In this example, `E3:61:5F:C0:FF:EE` is the address of the droid, and `D2-FFEE` is the name of the droid. The last four digits of the name (`FFEE`) match the last four digits of the address, which helps distinguish between multiple droids of the same model.
+   `E3:61:5F:C0:FF:EE` is the address; `D2-FFEE` is the name (the last four hex digits match the address).
 
-3. **Verify the Address:**
-   Once you have the address, you can use `gatttool` to interact with the droid and verify the connection:
-   ```
+3. **Verify the connection (optional):**
+   ```bash
    sudo gatttool -b E3:61:5F:C0:FF:EE --interactive
    ```
-   Replace `E3:61:5F:C0:FF:EE` with the actual address of your droid.
 
-4. **Update the Address in `app.py`:**
-   Open `src/app.py` and replace the `address` variable with the Bluetooth address obtained for your droid:
-   ```python
-   address = 'E3:61:5F:C0:FF:EE'  # Replace with your droid's Bluetooth address
-   ```
+### Windows
+
+Open **Settings → Bluetooth & devices**, pair the droid, then find its address
+in **Device Manager → Bluetooth** properties, or use a BLE scanner app.
 
 ## Usage
 
-- Use the web interface to input commands that you want to send to the droid.
-- The available commands can be found in the `commandmap` dictionary within `app.py`.
-- The web interface provides buttons for each command, making it easy to send commands to the droid.
+- Use the web interface buttons to trigger animations, sounds, leg actions, and head rotations.
+- The **Put to Sleep** button sends the droid back to sleep without waking it first.
+- The **Sound Tester** section lets you cycle through animation/sound IDs 0–255.
+- Available commands can also be retrieved programmatically via `GET /commands`.
 
 ## API Endpoints
 
@@ -79,23 +124,28 @@ To communicate with the droid, you need to obtain its Bluetooth identifier addre
 
 Renders the main web interface.
 
-### `POST /send_command`
+### `GET /commands`
 
-Sends a command to the droid. The command should be provided in the request body.
+Returns the list of available command names as JSON.
 
-**Request Parameters:**
-- `command`: The command to send to the droid. Must be one of the commands defined in the `commandmap` dictionary.
+### `GET|POST /send_command`
 
-**Response:**
-- `status`: "success" or "error"
-- `message`: A message describing the result of the operation.
+Sends a command to the droid.
 
-### `POST /put_to_sleep`
+**Parameters:**
+- `command` – one of the command names from `COMMAND_MAP` (query string for GET, form body for POST).
+
+**Response (JSON):**
+- `status`: `"success"` or `"error"`
+- `message`: Human-readable result.
+
+### `GET /put_to_sleep`
 
 Puts the droid to sleep.
 
-**Response:**
-- A message indicating whether the droid was successfully put to sleep or an error message.
+### `GET /test_sound?id=<0–255>`
+
+Plays a specific animation/sound by numeric ID.
 
 ## License
 

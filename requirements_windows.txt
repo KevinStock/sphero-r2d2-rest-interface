@@ -1,2 +1,2 @@
-flask
-bleak
+flask>=2.2
+bleak>=0.21

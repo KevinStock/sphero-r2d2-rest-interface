@@ -9,12 +9,17 @@
             font-family: Arial, sans-serif;
             text-align: center;
             padding: 20px;
+            max-width: 900px;
+            margin: 0 auto;
         }
-        #commandButtons {
+        h1 { margin-bottom: 0.3em; }
+        h2 { margin-top: 1.5em; }
+        .commandButtons {
             display: flex;
             flex-wrap: wrap;
             justify-content: center;
             gap: 10px;
+            margin-bottom: 20px;
         }
         button {
             padding: 15px 20px;
@@ -24,26 +29,51 @@
             background-color: #007BFF;
             color: white;
             cursor: pointer;
-            transition: background-color 0.3s ease;
+            transition: background-color 0.3s ease, opacity 0.3s ease;
         }
-        button:hover {
-            background-color: #0056b3;
+        button:hover:not(:disabled) { background-color: #0056b3; }
+        button:active:not(:disabled) { background-color: #004080; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .clicked { background-color: #28a745 !important; }
+        .btn-movement { background-color: #6f42c1; }
+        .btn-movement:hover:not(:disabled) { background-color: #59339d; }
+        .btn-legs { background-color: #e83e8c; }
+        .btn-legs:hover:not(:disabled) { background-color: #c42d75; }
+        .btn-head { background-color: #fd7e14; }
+        .btn-head:hover:not(:disabled) { background-color: #d96a0b; }
+        .btn-sleep { background-color: #6c757d; font-size: 18px; padding: 12px 40px; margin-top: 10px; }
+        .btn-sleep:hover:not(:disabled) { background-color: #545b62; }
+        .btn-play { font-size: 18px; padding: 12px 40px; background-color: #28a745; }
+        .btn-play:hover:not(:disabled) { background-color: #1e7e34; }
+        #message { margin-top: 20px; font-size: 18px; }
+        .sound-tester { margin: 20px 0; }
+        .sound-controls {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            margin: 20px 0;
         }
-        button:active {
-            background-color: #004080;
+        .sound-nav { font-size: 24px; width: 60px; height: 60px; border-radius: 50%; }
+        #soundId {
+            font-size: 48px;
+            font-weight: bold;
+            width: 120px;
+            text-align: center;
+            border: 2px solid #ccc;
+            border-radius: 8px;
+            padding: 4px;
         }
-        .clicked {
-            background-color: #28a745 !important;
-        }
-        #message {
-            margin-top: 20px;
-            font-size: 18px;
-        }
+        #soundHex { font-size: 14px; color: #666; }
+        #testMessage { margin-top: 15px; font-size: 16px; }
+        hr { margin: 30px 0; }
     </style>
 </head>
 <body>
     <h1>Send Command to Droid</h1>
-    <div id="commandButtons">
+
+    <h2>Sounds &amp; Emotes</h2>
+    <div class="commandButtons">
         <button data-command="laugh">Laugh</button>
         <button data-command="yes">Yes</button>
         <button data-command="no">No</button>
@@ -58,45 +88,177 @@
         <button data-command="excited">Excited</button>
         <button data-command="happy">Happy</button>
         <button data-command="surprise">Surprise</button>
-        <button data-command="tripod">Tripod</button>
-        <button data-command="bipod">Bipod</button>
     </div>
+
+    <h2>Movement Animations</h2>
+    <div class="commandButtons">
+        <button class="btn-movement" data-command="bow">Bow</button>
+        <button class="btn-movement" data-command="doubletake">Double Take</button>
+        <button class="btn-movement" data-command="shake">Shake</button>
+        <button class="btn-movement" data-command="longshake">Long Shake</button>
+        <button class="btn-movement" data-command="jittery">Jittery</button>
+        <button class="btn-movement" data-command="drive">Drive</button>
+        <button class="btn-movement" data-command="taunting">Taunting</button>
+        <button class="btn-movement" data-command="whisper">Whisper</button>
+        <button class="btn-movement" data-command="yelling">Yelling</button>
+        <button class="btn-movement" data-command="curious">Curious</button>
+    </div>
+
+    <h2>Legs</h2>
+    <div class="commandButtons">
+        <button class="btn-legs" data-command="tripod">Tripod</button>
+        <button class="btn-legs" data-command="bipod">Bipod</button>
+        <button class="btn-legs" data-command="waddle">Waddle</button>
+        <button class="btn-legs" data-command="stopwaddle">Stop Waddle</button>
+    </div>
+
+    <h2>Head Rotation</h2>
+    <div class="commandButtons">
+        <button class="btn-head" data-command="headleft">&#8592; Head Left</button>
+        <button class="btn-head" data-command="headcenter">&#8593; Head Center</button>
+        <button class="btn-head" data-command="headright">Head Right &#8594;</button>
+    </div>
+
+    <div style="margin-top: 20px;">
+        <button id="sleepBtn" class="btn-sleep">&#9790; Put to Sleep</button>
+    </div>
+
     <div id="message"></div>
 
+    <hr>
+
+    <h2>Sound Tester</h2>
+    <p style="color: #666; font-size: 14px;">Use the controls below to cycle through sound IDs (0&ndash;255)</p>
+    <div class="sound-controls">
+        <button id="prevBtn" class="sound-nav">&#9664;</button>
+        <div style="text-align: center;">
+            <input id="soundId" type="number" min="0" max="255" value="0">
+            <div id="soundHex">0x00</div>
+        </div>
+        <button id="nextBtn" class="sound-nav">&#9654;</button>
+    </div>
+    <button id="playBtn" class="btn-play">&#9654; Play</button>
+    <div id="testMessage"></div>
+
     <script>
-        document.getElementById('commandButtons').addEventListener('click', function(event) {
-            if (event.target.tagName === 'BUTTON') {
+        /* ------------------------------------------------------------------ */
+        /* Helpers                                                            */
+        /* ------------------------------------------------------------------ */
+        const allCommandBtns = document.querySelectorAll('.commandButtons button');
+        const messageDiv = document.getElementById('message');
+
+        /** Disable / enable every command button (prevents double-sends). */
+        function setCommandsDisabled(disabled) {
+            allCommandBtns.forEach(b => b.disabled = disabled);
+            document.getElementById('sleepBtn').disabled = disabled;
+        }
+
+        function showMessage(el, text, color, autoClear) {
+            el.textContent = text;
+            el.style.color = color;
+            if (autoClear) {
+                setTimeout(() => { el.textContent = ''; }, 3000);
+            }
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Command buttons                                                    */
+        /* ------------------------------------------------------------------ */
+        document.querySelectorAll('.commandButtons').forEach(container => {
+            container.addEventListener('click', function (event) {
+                if (event.target.tagName !== 'BUTTON' || event.target.disabled) return;
+
                 const button = event.target;
                 const command = button.getAttribute('data-command');
                 const formData = new FormData();
                 formData.append('command', command);
 
                 button.classList.add('clicked');
-                setTimeout(() => button.classList.remove('clicked'), 500);
+                setCommandsDisabled(true);
 
-                fetch('/send_command', {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(response => response.json())
+                fetch('/send_command', { method: 'POST', body: formData })
+                    .then(r => r.json())
+                    .then(data => {
+                        const ok = data.status === 'success';
+                        showMessage(messageDiv, data.message, ok ? 'green' : 'red', ok);
+                    })
+                    .catch(err => showMessage(messageDiv, 'An error occurred: ' + err, 'red', false))
+                    .finally(() => {
+                        button.classList.remove('clicked');
+                        setCommandsDisabled(false);
+                    });
+            });
+        });
+
+        /* ------------------------------------------------------------------ */
+        /* Sleep button                                                       */
+        /* ------------------------------------------------------------------ */
+        document.getElementById('sleepBtn').addEventListener('click', function () {
+            const btn = this;
+            btn.disabled = true;
+            setCommandsDisabled(true);
+            showMessage(messageDiv, 'Putting droid to sleep\u2026', '#333', false);
+
+            fetch('/put_to_sleep')
+                .then(r => r.json())
                 .then(data => {
-                    const messageDiv = document.getElementById('message');
-                    messageDiv.textContent = data.message;
-                    if (data.status === 'success') {
-                        messageDiv.style.color = 'green';
-                        setTimeout(() => {
-                            messageDiv.textContent = '';
-                        }, 3000);
-                    } else {
-                        messageDiv.style.color = 'red';
-                    }
+                    const ok = data.status === 'success';
+                    showMessage(messageDiv, data.message, ok ? 'green' : 'red', ok);
                 })
-                .catch(error => {
-                    const messageDiv = document.getElementById('message');
-                    messageDiv.textContent = 'An error occurred: ' + error;
-                    messageDiv.style.color = 'red';
-                });
+                .catch(err => showMessage(messageDiv, 'Error: ' + err, 'red', false))
+                .finally(() => setCommandsDisabled(false));
+        });
+
+        /* ------------------------------------------------------------------ */
+        /* Sound tester                                                       */
+        /* ------------------------------------------------------------------ */
+        let currentSoundId = 0;
+        const soundIdEl = document.getElementById('soundId');
+        const soundHexEl = document.getElementById('soundHex');
+        const testMsgEl = document.getElementById('testMessage');
+
+        function updateDisplay() {
+            soundIdEl.value = currentSoundId;
+            soundHexEl.textContent = '0x' + currentSoundId.toString(16).toUpperCase().padStart(2, '0');
+        }
+
+        soundIdEl.addEventListener('input', () => {
+            const val = parseInt(soundIdEl.value, 10);
+            if (!isNaN(val)) {
+                currentSoundId = Math.max(0, Math.min(255, val));
             }
+            soundHexEl.textContent = '0x' + currentSoundId.toString(16).toUpperCase().padStart(2, '0');
+        });
+
+        soundIdEl.addEventListener('blur', updateDisplay);
+
+        document.getElementById('prevBtn').addEventListener('click', () => {
+            currentSoundId = (currentSoundId - 1 + 256) % 256;
+            updateDisplay();
+        });
+
+        document.getElementById('nextBtn').addEventListener('click', () => {
+            currentSoundId = (currentSoundId + 1) % 256;
+            updateDisplay();
+        });
+
+        document.getElementById('playBtn').addEventListener('click', () => {
+            const btn = document.getElementById('playBtn');
+            btn.disabled = true;
+            btn.textContent = '\u23F3 Playing\u2026';
+            btn.style.backgroundColor = '#6c757d';
+            testMsgEl.textContent = `Sending sound id=${currentSoundId}\u2026`;
+            testMsgEl.style.color = '#333';
+
+            fetch('/test_sound?id=' + currentSoundId)
+                .then(r => r.json())
+                .then(data => showMessage(testMsgEl, data.message, data.status === 'success' ? 'green' : 'red', false))
+                .catch(err => showMessage(testMsgEl, 'Error: ' + err, 'red', false))
+                .finally(() => {
+                    btn.disabled = false;
+                    btn.textContent = '\u25B6 Play';
+                    btn.style.backgroundColor = '#28a745';
+                });
         });
     </script>
 </body>
